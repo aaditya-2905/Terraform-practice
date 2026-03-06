@@ -1,0 +1,17 @@
+# Terraform files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+
+# Terraform variable files
+*.tfvars
+
+# Terraform lock file
+.terraform.lock.hcl
+
+# Mac / Linux junk
+.DS_Store
