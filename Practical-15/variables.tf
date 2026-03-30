@@ -42,8 +42,8 @@ variable "sg_ingress_rule" {
     }
 
     https = {
-      from_port   = 443
-      to_port     = 443
+      from_port   = 8080
+      to_port     = 8080
       protocol    = "tcp"
       cidr_blocks = ["0.0.0.0/0"]
       description = "HTTPS access"
@@ -71,3 +71,63 @@ variable "sg_egress_rule" {
     }
   }
 }
+
+variable "alb_name" {
+  description = "alb name"
+  default     = "project1-alb"
+}
+
+variable "s3_bucket_name" {
+  description = "bucket name"
+  default     = "project1-s3-bucket-tf"
+}
+
+variable "s3_environment" {
+  default = "project1"
+}
+
+variable "iam_role1_name" {
+  description = "Name of the IAM role for ECS task execution"
+  default     = "project1-ecs-task-execution-role"
+}
+
+variable "iam_role2_name" {
+  description = "Name of the IAM role for codedeploy"
+  default     = "project1-codedeploy-role"
+}
+
+variable "alb_tg1_name" {
+  description = "1st target group name"
+  default     = "blue-tg"
+}
+
+variable "alb_tg2_name" {
+  description = "2nd target group name"
+  default     = "green-tg"
+}
+
+variable "ecr_repo" {
+  description = "Name of ecr repo"
+  default     = "project1-ecr-repo"
+}
+
+variable "ecs_cluster_name" {
+  description = "name for ecs cluster"
+  default = "project1-ecs-cluster"
+}
+
+variable "ecs_task_family" {
+  description = "value for task family"
+  default = "project1-ecs-task-family"
+}
+
+variable "ecs_desired_count" {
+  description = "desired count for ecs service"
+  default = 1
+}
+
+variable "codedeploy_app_name" {
+  description = "name for the deploy app"
+  default = "project1-codedeploy-app"
+}
+
