@@ -1,0 +1,48 @@
+stages:
+  - Validate
+  - Deploy_Mumbai
+  - Deploy_US
+
+variables:
+  TF_ROOT: "."
+
+before_script:
+  - apt-get update -y
+  - apt-get install -y unzip curl
+  - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
+  - unzip terraform.zip
+  - mv terraform /usr/local/bin/
+  - terraform version
+
+validate:
+  stage: validate
+  script:
+    - terraform init
+    - terraform validate
+    - terraform plan
+
+deploy_mumbai:
+  stage: deploy_mumbai
+  script:
+    - terraform init
+    - terraform plan
+    - terraform apply -target=module.vpc_mumbai \
+                      -target=module.sg_mumbai \
+                      -target=module.ec2_mumbai \
+                      -target=module.alb_mumbai \
+                      -auto-approve
+  only:
+    - main
+
+deploy_us:
+  stage: deploy_us
+  script:
+    - terraform init
+    - terraform plan
+    - terraform apply -target=module.vpc_us \
+                      -target=module.sg_us \
+                      -target=module.ec2_us \
+                      -target=module.alb_us \
+                      -auto-approve
+  only:
+    - main
