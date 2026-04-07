@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>User Registration</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            width: 320px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #5a67d8;
+        }
+
+        .error {
+            color: red;
+            font-size: 12px;
+        }
+
+        .success {
+            color: green;
+            font-size: 14px;
+            text-align: center;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h2>Register</h2>
+
+        <input type="text" id="name" placeholder="Full Name" />
+        <input type="email" id="email" placeholder="Email" />
+        <input type="password" id="password" placeholder="Password" />
+
+        <div id="error" class="error"></div>
+
+        <button onclick="registerUser()">Register</button>
+
+        <div id="success" class="success"></div>
+    </div>
+
+    <script>
+        function validateEmail(email) {
+            // Strong email regex
+            const regex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
+            return regex.test(email);
+        }
+
+        function registerUser() {
+            const name = document.getElementById("name").value.trim();
+            const email = document.getElementById("email").value.trim();
+            const password = document.getElementById("password").value.trim();
+
+            const errorDiv = document.getElementById("error");
+            const successDiv = document.getElementById("success");
+
+            errorDiv.innerText = "";
+            successDiv.innerText = "";
+
+            // Validation
+            if (!name || !email || !password) {
+                errorDiv.innerText = "All fields are required!";
+                return;
+            }
+
+            if (name.length < 3) {
+                errorDiv.innerText = "Name must be at least 3 characters.";
+                return;
+            }
+
+            if (!validateEmail(email)) {
+                errorDiv.innerText = "Invalid email format!";
+                return;
+            }
+
+            if (password.length < 6) {
+                errorDiv.innerText = "Password must be at least 6 characters.";
+                return;
+            }
+
+            successDiv.innerText = "User registered successfully! 🎉";
+
+            fetch("http://127.0.0.1:3000/register", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ name, email, password })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById("success").innerText = data.message;
+                })
+                .catch(err => {
+                    document.getElementById("error").innerText = "Server error!";
+                });
+        }
+    </script>
+
+</body>
+
+</html>
