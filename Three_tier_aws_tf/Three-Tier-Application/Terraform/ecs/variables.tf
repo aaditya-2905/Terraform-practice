@@ -21,3 +21,7 @@ variable "sg_id" {
 variable "db_cluster_endpoint" {
   type = string
 }
+
+variable "db_secret_arn" {
+  type = string
+}

@@ -1,167 +1,144 @@
 const express = require('express');
-const mysql = require('mysql2/promise'); // Use mysql2/promise for async/await support
+const { createPool } = require('mysql2/promise');
 const cors = require('cors');
 const dotenv = require('dotenv');
-dotenv.config();
 
-const { createPool } = require('mysql2/promise');
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 const db = createPool({
-    host: process.env.host,
-    user: process.env.user,
-    password: process.env.password,
-    database: process.env.database,
-    connectionLimit: 10 // Adjust based on your requirements
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    connectionLimit: 10,
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    // Handle the error appropriately, e.g., log it or send an alert
+console.log("DB CONFIG:", {
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    database: process.env.DB_NAME
 });
 
-// Centralized database connection handling
-process.on('SIGINT', async () => {
-    await db.end();
-    process.exit();
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Rejection:', err);
 });
 
-const getLastStudentID = async () => {
-    const [result] = await db.query('SELECT MAX(id) AS lastID FROM student');
-    const lastID = result[0].lastID || 0;
-    return lastID;
-};
-
-const getLastteacherID = async () => {
-    const [result] = await db.query('SELECT MAX(id) AS lastID FROM teacher');
-    const lastID = result[0].lastID || 0;
-    return lastID;
-};
-
-// app.get('/', (req, res) => {
-//     return res.json("From Backend!!!");
-// });
-
-const apiRouter = express.Router();
-
-apiRouter.get('/health', (req, res) => {
-    return res.status(200).json({ status: 'healthy' });
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
 });
 
-apiRouter.get('/', async (req, res) => {
+app.get('/api/health', async (req, res) => {
     try {
-        // Fetch data from the student table
+        await db.query("SELECT 1");
+        res.status(200).json({ status: "healthy" });
+    } catch (err) {
+        console.error("Health check failed:", err);
+        res.status(500).json({ status: "unhealthy" });
+    }
+});
+
+
+const router = express.Router();
+
+/* ===== GET STUDENTS ===== */
+router.get('/student', async (req, res) => {
+    try {
         const [data] = await db.query("SELECT * FROM student");
-        return res.json({ message: "From Backend!!!", studentData: data });
-    } catch (error) {
-        console.error('Error fetching student data:', error);
-        return res.status(500).json({ error: 'Error fetching student data' });
+        res.json(data);
+    } catch (err) {
+        console.error("GET student error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-apiRouter.get('/student', async (req, res) => {
-    const [data] = await db.query("SELECT * FROM student");
-    return res.json(data);
-});
-
-apiRouter.get('/teacher', async (req, res) => {
-    const [data] = await db.query("SELECT * FROM teacher");
-    return res.json(data);
-});
-
-apiRouter.post('/addstudent', async (req, res) => {
+/* ===== GET TEACHERS ===== */
+router.get('/teacher', async (req, res) => {
     try {
-        const lastStudentID = await getLastStudentID();
-        const nextStudentID = lastStudentID + 1;
-
-        const studentData = {
-            id: nextStudentID,
-            name: req.body.name,
-            roll_number: req.body.rollNo,
-            class: req.body.class,
-        };
-
-        const sql = `INSERT INTO student (id, name, roll_number, class) VALUES (?, ?, ?, ?)`;
-        await db.query(sql, [studentData.id, studentData.name, studentData.roll_number, studentData.class]);
-        return res.json({ message: 'Data inserted successfully' });
-    } catch (error) {
-        console.error('Error:', error);
-        return res.status(500).json({ error: 'Error inserting data' });
+        const [data] = await db.query("SELECT * FROM teacher");
+        res.json(data);
+    } catch (err) {
+        console.error("GET teacher error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-apiRouter.post('/addteacher', async (req, res) => {
+/* ===== ADD STUDENT ===== */
+router.post('/addstudent', async (req, res) => {
     try {
-        const lastteacherID = await getLastteacherID();
-        const nextteacherID = lastteacherID + 1;
+        const { name, rollNo, class: cls } = req.body;
 
-        const TeacherData = {
-            id: nextteacherID,
-            name: req.body.name,
-            subject: req.body.subject,
-            class: req.body.class,
-        };
+        if (!name || !rollNo) {
+            return res.status(400).json({ error: "Missing required fields" });
+        }
 
-        const sql = `INSERT INTO teacher (id, name, subject, class) VALUES (?, ?, ?, ?)`;
-        await db.query(sql, [TeacherData.id, TeacherData.name, TeacherData.subject, TeacherData.class]);
-        return res.json({ message: 'Data inserted successfully' });
-    } catch (error) {
-        console.error('Error:', error);
-        return res.status(500).json({ error: 'Error inserting data' });
+        const [result] = await db.query(
+            "INSERT INTO student (name, roll_number, class) VALUES (?, ?, ?)",
+            [name, rollNo, cls]
+        );
+
+        res.json({ message: "Student added", id: result.insertId });
+    } catch (err) {
+        console.error("POST student error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-apiRouter.delete('/student/:id', async (req, res) => {
-    const studentId = req.params.id;
-    const sqlDelete = 'DELETE FROM student WHERE id = ?';
-    const sqlSelect = 'SELECT id FROM student ORDER BY id';
-
+/* ===== ADD TEACHER ===== */
+router.post('/addteacher', async (req, res) => {
     try {
-        await db.query(sqlDelete, [studentId]);
+        const { name, subject, class: cls } = req.body;
 
-        const [rows] = await db.query(sqlSelect);
+        if (!name || !subject) {
+            return res.status(400).json({ error: "Missing required fields" });
+        }
 
-        const updatePromises = rows.map(async (row, index) => {
-            const newId = index + 1;
-            await db.query('UPDATE student SET id = ? WHERE id = ?', [newId, row.id]);
-        });
+        const [result] = await db.query(
+            "INSERT INTO teacher (name, subject, class) VALUES (?, ?, ?)",
+            [name, subject, cls]
+        );
 
-        await Promise.all(updatePromises);
-        return res.json({ message: 'Student deleted successfully' });
-    } catch (error) {
-        console.error('Error:', error);
-        return res.status(500).json({ error: 'Error deleting student' });
+        res.json({ message: "Teacher added", id: result.insertId });
+    } catch (err) {
+        console.error("POST teacher error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-apiRouter.delete('/teacher/:id', async (req, res) => {
-    const teacherID = req.params.id;
-    const sqlDelete = 'DELETE FROM teacher WHERE id = ?';
-    const sqlSelect = 'SELECT id FROM teacher ORDER BY id';
-
+/* ===== DELETE STUDENT ===== */
+router.delete('/student/:id', async (req, res) => {
     try {
-        await db.query(sqlDelete, [teacherID]);
+        const { id } = req.params;
 
-        const [rows] = await db.query(sqlSelect);
+        await db.query("DELETE FROM student WHERE id = ?", [id]);
 
-        const updatePromises = rows.map(async (row, index) => {
-            const newId = index + 1;
-            await db.query('UPDATE teacher SET id = ? WHERE id = ?', [newId, row.id]);
-        });
-
-        await Promise.all(updatePromises);
-        return res.json({ message: 'Teacher deleted successfully' });
-    } catch (error) {
-        console.error('Error:', error);
-        return res.status(500).json({ error: 'Error deleting teacher' });
+        res.json({ message: "Student deleted" });
+    } catch (err) {
+        console.error("DELETE student error:", err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-app.use('/api', apiRouter);
+/* ===== DELETE TEACHER ===== */
+router.delete('/teacher/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
 
-app.listen(3000, () => {
-    console.log("listening on Port 3000");
+        await db.query("DELETE FROM teacher WHERE id = ?", [id]);
+
+        res.json({ message: "Teacher deleted" });
+    } catch (err) {
+        console.error("DELETE teacher error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.use('/api', router);
+
+const PORT = 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });

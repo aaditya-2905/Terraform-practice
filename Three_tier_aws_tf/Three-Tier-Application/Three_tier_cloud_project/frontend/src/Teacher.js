@@ -1,5 +1,3 @@
-// Teacher.js
-
 import React, { useState, useEffect } from 'react';
 import './Teacher.css';
 
@@ -10,19 +8,28 @@ function Teacher() {
     class: ''
   });
 
-  const [data, setData]= useState([])
+  const [data, setData] = useState([]);
 
-  const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
+  const API_BASE_URL = "/api";
 
-  const getData=()=> {
+  // ✅ Safe response handler
+  const handleResponse = async (res) => {
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text);
+    }
+    return res.json();
+  };
+
+  const getData = () => {
     fetch(`${API_BASE_URL}/teacher`)
-    .then((res) => res.json())
-    .then((data) => setData(data))
-    .catch((err) => console.log(err));
-  }
+      .then(handleResponse)
+      .then((data) => setData(data))
+      .catch((err) => console.log("GET Error:", err.message));
+  };
 
   useEffect(() => {
-    getData()
+    getData();
   }, []);
 
   const handleInputChange = (e) => {
@@ -32,105 +39,92 @@ function Teacher() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+
+    const requestOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(TeacherData)
+    };
+
+    fetch(`${API_BASE_URL}/addteacher`, requestOptions)
+      .then(handleResponse)
+      .then(() => {
+        getData();
+      })
+      .catch((err) => console.log("POST Error:", err.message));
+
     setTeacherData({
       name: '',
       subject: '',
-      class: '',
+      class: ''
     });
+  };
 
-
-  const requestOptions = {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify( TeacherData )
-};
-  
-  fetch(`${API_BASE_URL}/addteacher`, requestOptions ).then((res) => res.json())
-.then(() => {
-    getData()}
-)
-    .catch((err) => console.log(err));
-};
-
-const handleDelete = (id) => {
-  fetch(`${API_BASE_URL}/teacher/${id}`, {
-    method: 'DELETE',
-  })
-    .then((res) => res.json())
-    .then(() => {
-      getData();
+  const handleDelete = (id) => {
+    fetch(`${API_BASE_URL}/teacher/${id}`, {
+      method: 'DELETE',
     })
-    .catch((err) => console.error('Error deleting data:', err));
-};
+      .then(handleResponse)
+      .then(() => {
+        getData();
+      })
+      .catch((err) => console.log("DELETE Error:", err.message));
+  };
 
   return (
-    <div className="Teacher-container">
-      <div className="content">
-        <h2 className='store-teacher-details' style={{ marginLeft: '100px' }}>Teacher Details</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Name:</label>
-            <input
-              type="text"
-              name="name"
-              value={TeacherData.name}
-              onChange={handleInputChange}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Subject:</label>
-            <input
-              type="text"
-              name="subject"
-              value={TeacherData.subject}
-              onChange={handleInputChange}
-              required
-            />
-          </div>
-          <div className="form-group">
-            <label>Class:</label>
-            <input
-              type="text"
-              name="class"
-              value={TeacherData.class}
-              onChange={handleInputChange}
-            />
-          </div>
-          <div className="form-group">
-            <p style={{ marginLeft: '50px' }}>
-            <button type="submit">Submit</button>
-            </p>
-          </div>
-        </form>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '50px 0' }}>
-      <h2 className='teacher-details'>Teacher details</h2>
-      <table className="student-table gradient-bg" style={{ border: '1px solid #ccc', borderCollapse: 'collapse', margin: '100px 0',marginLeft: '825px', marginTop: '200px', width: '40%', backgroundColor: '#f4f4f4'}}>
+    <div>
+      <h2>Teacher Details</h2>
+
+      <form onSubmit={handleSubmit}>
+        <input
+          name="name"
+          value={TeacherData.name}
+          onChange={handleInputChange}
+          placeholder="Name"
+          required
+        />
+        <input
+          name="subject"
+          value={TeacherData.subject}
+          onChange={handleInputChange}
+          placeholder="Subject"
+          required
+        />
+        <input
+          name="class"
+          value={TeacherData.class}
+          onChange={handleInputChange}
+          placeholder="Class"
+        />
+
+        <button type="submit">Submit</button>
+      </form>
+
+      <table>
         <thead>
-          <tr style={{ backgroundColor: '#ddd' }}>
-          <td style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>TeacherID</td>
-            <th style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>Name</th>
-            <th style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>Subject</th>
-            <th style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>Class</th>
-            <th style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>Actions</th>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Subject</th>
+            <th>Class</th>
+            <th>Action</th>
           </tr>
         </thead>
+
         <tbody>
-          {data.map((d, i) => (
-            <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#f9f9f9' : '#fff' }}>
-              <td style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>{d.id}</td>
-              <td style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>{d.name}</td>
-              <td style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>{d.subject}</td>
-              <td style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>{d.class}</td>
-              <td style={{ border: '1px solid #ccc', padding: '15px', textAlign: 'center' }}>
-              <button className="delete-button" onClick={() => handleDelete(d.id)}>Delete</button>
+          {data.map((d) => (
+            <tr key={d.id}>
+              <td>{d.id}</td>
+              <td>{d.name}</td>
+              <td>{d.subject}</td>
+              <td>{d.class}</td>
+              <td>
+                <button onClick={() => handleDelete(d.id)}>Delete</button>
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
     </div>
   );
 }

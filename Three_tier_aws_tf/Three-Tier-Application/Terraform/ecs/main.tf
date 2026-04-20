@@ -18,7 +18,7 @@ module "ecs" {
         app = {
           image = var.ecr_image_url
 
-          port_mappings = [
+          portMappings = [
             {
               name          = "app"
               containerPort = 3000
@@ -30,8 +30,23 @@ module "ecs" {
 
           environment = [
             {
-              name  = "DB_HOST"
+              name  = "host"
               value = var.db_cluster_endpoint
+            },
+            {
+              name  = "database"
+              value = "school"
+            }
+          ]
+
+          secrets = [
+            {
+              name      = "password"
+              valueFrom = "${var.db_secret_arn}:password::"
+            },
+            {
+              name      = "user"
+              valueFrom = "${var.db_secret_arn}:username::"
             }
           ]
 
@@ -58,6 +73,7 @@ module "ecs" {
       security_group_ids = var.sg_id
 
       assign_public_ip = false
+      task_exec_secret_arns = [var.db_secret_arn]
     }
   }
 }

@@ -1,20 +1,28 @@
-# Use the official Node.js image as a base image
-FROM node:14
+FROM node:20-alpine AS builder
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json to the working directory
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+RUN npm ci --only=production
 
-# Copy the rest of the application code to the working directory
+FROM node:20-alpine
+
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/node_modules ./node_modules
+COPY package*.json ./
+
 COPY . .
 
-# Expose the port that your app is running on
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
 EXPOSE 3000
 
-# Command to run your application
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1
 CMD ["node", "server.js"]

@@ -25,3 +25,7 @@ output "secondary_alb_dns" {
 output "cloudfront_domain_name" {
   value = module.cloudfront.cloudfront_domain_name
 }
+
+output "alb_secondary_arn_debug" {
+  value = module.alb_secondary.lb_arn
+}

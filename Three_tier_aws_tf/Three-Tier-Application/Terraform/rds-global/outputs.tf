@@ -17,3 +17,8 @@ output "secondary_cluster_endpoint" {
   description = "Secondary cluster endpoint (read-only until promotion)"
   value       = module.aurora_secondary.cluster_endpoint
 }
+
+output "master_user_secret_arn" {
+  description = "The ARN of the master user secret created in Secrets Manager"
+  value       = aws_secretsmanager_secret.db_password.arn
+}

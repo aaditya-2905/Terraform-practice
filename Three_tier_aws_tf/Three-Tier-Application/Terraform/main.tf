@@ -78,7 +78,7 @@ module "alb" {
       target_type      = "ip"
 
       health_check = {
-        path                = "/"
+        path                = "/api/health"
         interval            = 30
         timeout             = 5
         healthy_threshold   = 2
@@ -127,7 +127,7 @@ module "alb_secondary" {
       target_type      = "ip"
 
       health_check = {
-        path                = "/"
+        path                = "/api/health"
         interval            = 30
         timeout             = 5
         healthy_threshold   = 2
@@ -167,32 +167,6 @@ module "ecr" {
   ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
 }
 
-module "ecs_primary" {
-  source = "./ecs"
-
-  aws_region           = var.aws_region
-  ecr_image_url        = module.ecr.ecr_repository_url
-  alb_target_group_arn = module.alb.target_group_arns["app"]
-  pvt_subnet_ids       = module.vpc.private_subnet_ids
-  sg_id                = [module.sg.sg_id]
-  db_cluster_endpoint  = module.rds_global.primary_cluster_endpoint
-}
-
-module "ecs_secondary" {
-  source = "./ecs"
-
-  providers = {
-    aws = aws.secondary
-  }
-
-  aws_region           = var.secondary_region
-  ecr_image_url        = module.ecr.ecr_repository_url
-  alb_target_group_arn = module.alb_secondary.target_group_arns["app"]
-  pvt_subnet_ids       = module.vpc_secondary.private_subnet_ids
-  sg_id                = [module.sg_secondary.sg_id]
-  db_cluster_endpoint  = module.rds_global.reader_endpoint
-}
-
 module "rds_global" {
   source = "./rds-global"
 
@@ -209,6 +183,34 @@ module "rds_global" {
   secondary_vpc_cidr = var.secondary_vpc_cidr
   primary_sg_id      = module.sg.sg_id
   secondary_sg_id    = module.sg_secondary.sg_id
+}
+
+module "ecs_primary" {
+  source = "./ecs"
+
+  aws_region           = var.aws_region
+  ecr_image_url        = module.ecr.ecr_repository_url
+  alb_target_group_arn = module.alb.target_group_arns["app"]
+  pvt_subnet_ids       = module.vpc.private_subnet_ids
+  sg_id                = [module.sg.sg_id]
+  db_cluster_endpoint  = module.rds_global.primary_cluster_endpoint
+  db_secret_arn        = module.rds_global.master_user_secret_arn
+}
+
+module "ecs_secondary" {
+  source = "./ecs"
+
+  providers = {
+    aws = aws.secondary
+  }
+
+  aws_region           = var.secondary_region
+  ecr_image_url        = module.ecr.ecr_repository_url
+  alb_target_group_arn = module.alb_secondary.target_group_arns["app"]
+  pvt_subnet_ids       = module.vpc_secondary.private_subnet_ids
+  sg_id                = [module.sg_secondary.sg_id]
+  db_cluster_endpoint  = module.rds_global.reader_endpoint
+  db_secret_arn        = module.rds_global.master_user_secret_arn
 }
 
 module "cloudfront" {
@@ -269,6 +271,7 @@ resource "aws_wafv2_web_acl" "alb_waf_primary" {
 resource "aws_wafv2_web_acl_association" "alb_primary_assoc" {
   resource_arn = module.alb.lb_arn
   web_acl_arn  = aws_wafv2_web_acl.alb_waf_primary.arn
+  depends_on   = [module.alb]
 }
 
 resource "aws_wafv2_web_acl" "alb_waf_secondary" {
@@ -319,8 +322,10 @@ resource "aws_wafv2_web_acl" "alb_waf_secondary" {
 }
 
 resource "aws_wafv2_web_acl_association" "alb_secondary_assoc" {
+  provider     = aws.secondary
   resource_arn = module.alb_secondary.lb_arn
   web_acl_arn  = aws_wafv2_web_acl.alb_waf_secondary.arn
+  depends_on   = [module.alb_secondary]
 }
 
 resource "aws_route53_zone" "main" {
@@ -372,4 +377,27 @@ resource "aws_route53_health_check" "primary" {
   resource_path     = "/health"
   failure_threshold = 3
   request_interval  = 30
+}
+
+data "aws_iam_policy_document" "s3_policy" {
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${module.s3.s3_arn}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [module.cloudfront.cloudfront_arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "bucket_policy" {
+  bucket = module.s3.s3_bucket_id
+  policy = data.aws_iam_policy_document.s3_policy.json
 }
