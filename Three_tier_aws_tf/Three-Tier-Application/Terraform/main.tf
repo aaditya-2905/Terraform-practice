@@ -1,172 +1,189 @@
+# ═══════════════════════════════════════════════════════════════
+# Root Terraform configuration — Three-Tier Application
+# All infrastructure is provisioned through wrapper modules from
+# Terraform-wrappers/wrappers/.  No local sub-modules are used
+# except rds-global (no wrapper available).
+# ═══════════════════════════════════════════════════════════════
+
+# ─── VPC (map-based wrapper) ──────────────────────────────────
 module "vpc" {
-  source = "aaditya-2905/vpc/aws"
+  source = "../../Terraform-wrappers/wrappers/vpc-wrapper"
+  vpcs   = var.vpcs
+}
 
-  vpc_cidr_block             = var.vpc_cidr
-  public_subnet_cidr_blocks  = var.public_subnets
-  private_subnet_cidr_blocks = var.private_subnets
-  availability_zones         = var.azs
-  enable_nat_gateway         = true
-  environment                = "dev"
+# ─── Data sources: look up subnets created by VPC wrapper ─────
+# The VPC wrapper only exposes vpc_ids and vpc_cidr_blocks.
+# We use data sources to discover the subnet IDs by CIDR block.
 
-  additional_tags = {
-    Name = "three-tier-vpc-${var.aws_region}"
+data "aws_subnets" "primary_public" {
+  filter {
+    name   = "vpc-id"
+    values = [module.vpc.vpc_ids["primary"]]
+  }
+  filter {
+    name   = "cidr-block"
+    values = var.vpcs["primary"].public_subnet_cidr_blocks
   }
 }
 
-module "vpc_secondary" {
-  source = "aaditya-2905/vpc/aws"
-
-  providers = {
-    aws = aws.secondary
+data "aws_subnets" "primary_private" {
+  filter {
+    name   = "vpc-id"
+    values = [module.vpc.vpc_ids["primary"]]
   }
-
-  vpc_cidr_block             = var.secondary_vpc_cidr
-  public_subnet_cidr_blocks  = var.secondary_public_subnets
-  private_subnet_cidr_blocks = var.secondary_private_subnets
-  availability_zones         = var.secondary_azs
-  enable_nat_gateway         = true
-  environment                = "dev"
-
-  additional_tags = {
-    Name = "three-tier-vpc-sec-${var.secondary_region}"
+  filter {
+    name   = "cidr-block"
+    values = var.vpcs["primary"].private_subnet_cidr_blocks
   }
 }
 
-module "s3" {
-  source = "./s3"
-  region = var.aws_region
+data "aws_subnets" "secondary_public" {
+  provider = aws.secondary
+
+  filter {
+    name   = "vpc-id"
+    values = [module.vpc.vpc_ids["secondary"]]
+  }
+  filter {
+    name   = "cidr-block"
+    values = var.vpcs["secondary"].public_subnet_cidr_blocks
+  }
 }
 
+data "aws_subnets" "secondary_private" {
+  provider = aws.secondary
+
+  filter {
+    name   = "vpc-id"
+    values = [module.vpc.vpc_ids["secondary"]]
+  }
+  filter {
+    name   = "cidr-block"
+    values = var.vpcs["secondary"].private_subnet_cidr_blocks
+  }
+}
+
+# ─── Security Groups (map-based wrapper) ──────────────────────
 module "sg" {
-  source = "aaditya-2905/sg/aws"
+  source = "../../Terraform-wrappers/wrappers/sg-wrapper"
 
-  vpc_id        = module.vpc.vpc_id
-  ingress_rules = var.sg_ingress_rules
-  egress_rules  = var.sg_egress_rules
-  environment   = "dev"
-}
+  sgs = {
+    primary = {
+      name        = "three-tier-primary-sg"
+      description = "Security group for primary region"
+      vpc_id      = module.vpc.vpc_ids["primary"]
+      environment = "prod"
 
-module "sg_secondary" {
-  source = "aaditya-2905/sg/aws"
+      ingress_rules = [
+        { from_port = 80, to_port = 80, protocol = "tcp", cidr_blocks = ["0.0.0.0/0"] },
+        { from_port = 443, to_port = 443, protocol = "tcp", cidr_blocks = ["0.0.0.0/0"] },
+        { from_port = 3000, to_port = 3000, protocol = "tcp", cidr_blocks = ["0.0.0.0/0"] },
+        { from_port = 3306, to_port = 3306, protocol = "tcp", cidr_blocks = [var.vpcs["primary"].cidr_block] }
+      ]
 
-  providers = {
-    aws = aws.secondary
-  }
+      egress_rules = [
+        { from_port = 0, to_port = 0, protocol = "-1", cidr_blocks = ["0.0.0.0/0"] }
+      ]
+    }
 
-  vpc_id        = module.vpc_secondary.vpc_id
-  ingress_rules = var.sg_ingress_rules
-  egress_rules  = var.sg_egress_rules
-  environment   = "dev"
-}
+    secondary = {
+      name        = "three-tier-secondary-sg"
+      description = "Security group for secondary region"
+      vpc_id      = module.vpc.vpc_ids["secondary"]
+      environment = "prod"
 
-module "alb" {
-  source  = "aaditya-2905/alb/aws"
-  version = "1.5.0"
+      ingress_rules = [
+        { from_port = 80, to_port = 80, protocol = "tcp", cidr_blocks = ["0.0.0.0/0"] },
+        { from_port = 443, to_port = 443, protocol = "tcp", cidr_blocks = ["0.0.0.0/0"] },
+        { from_port = 3000, to_port = 3000, protocol = "tcp", cidr_blocks = ["0.0.0.0/0"] },
+        { from_port = 3306, to_port = 3306, protocol = "tcp", cidr_blocks = [var.vpcs["secondary"].cidr_block] }
+      ]
 
-  name        = "three-tier-alb-${var.aws_region}"
-  vpc_id      = module.vpc.vpc_id
-  subnet_ids  = module.vpc.public_subnet_ids
-  sg_id       = module.sg.sg_id
-  environment = "dev"
-  internal    = false
-
-  target_groups = {
-    app = {
-      name_prefix      = "app"
-      backend_protocol = "HTTP"
-      backend_port     = 3000
-      target_type      = "ip"
-
-      health_check = {
-        path                = "/api/health"
-        interval            = 30
-        timeout             = 5
-        healthy_threshold   = 2
-        unhealthy_threshold = 2
-        matcher             = "200"
-        port                = "3000"
-      }
+      egress_rules = [
+        { from_port = 0, to_port = 0, protocol = "-1", cidr_blocks = ["0.0.0.0/0"] }
+      ]
     }
   }
-
-  listeners = {
-    http = {
-      target_group_key   = "app"
-      port               = 80
-      protocol           = "HTTP"
-      target_group_index = 0
-    }
-  }
-
-  tags = {
-    Environment = "dev"
-    Project     = "three-tier-${var.aws_region}"
-  }
 }
 
+# ─── ALB Primary (single-instance wrapper) ────────────────────
+module "alb_primary" {
+  source = "../../Terraform-wrappers/wrappers/alb-wrapper"
+
+  name                       = var.primary_alb_name
+  internal                   = var.primary_alb_internal
+  environment                = var.primary_alb_environment
+  vpc_id                     = module.vpc.vpc_ids["primary"]
+  subnet_ids                 = data.aws_subnets.primary_public.ids
+  sg_id                      = module.sg.sg_ids["primary"]
+  enable_deletion_protection = false
+
+  target_groups = var.primary_alb_target_groups
+  listeners     = var.primary_alb_listeners
+}
+
+# ─── ALB Secondary (single-instance wrapper) ──────────────────
 module "alb_secondary" {
-  source  = "aaditya-2905/alb/aws"
-  version = "1.5.0"
+  source = "../../Terraform-wrappers/wrappers/alb-wrapper"
 
-  providers = {
-    aws = aws.secondary
-  }
+  aws_region                 = var.secondary_region
+  name                       = var.secondary_alb_name
+  internal                   = var.secondary_alb_internal
+  environment                = var.secondary_alb_environment
+  vpc_id                     = module.vpc.vpc_ids["secondary"]
+  subnet_ids                 = data.aws_subnets.secondary_public.ids
+  sg_id                      = module.sg.sg_ids["secondary"]
+  enable_deletion_protection = false
 
-  name        = "three-tier-alb-sec-${var.secondary_region}"
-  vpc_id      = module.vpc_secondary.vpc_id
-  subnet_ids  = module.vpc_secondary.public_subnet_ids
-  sg_id       = module.sg_secondary.sg_id
-  environment = "dev"
-  internal    = false
-
-  target_groups = {
-    app = {
-      name_prefix      = "app"
-      backend_protocol = "HTTP"
-      backend_port     = 3000
-      target_type      = "ip"
-
-      health_check = {
-        path                = "/api/health"
-        interval            = 30
-        timeout             = 5
-        healthy_threshold   = 2
-        unhealthy_threshold = 2
-        matcher             = "200"
-        port                = "3000"
-      }
-    }
-  }
-
-  listeners = {
-    http = {
-      target_group_key   = "app"
-      port               = 80
-      protocol           = "HTTP"
-      target_group_index = 0
-    }
-  }
-
-  tags = {
-    Environment = "dev"
-    Project     = "three-tier-${var.secondary_region}"
-  }
+  target_groups = var.secondary_alb_target_groups
+  listeners     = var.secondary_alb_listeners
 }
 
+# ─── IAM (multi-resource wrapper) ─────────────────────────────
 module "iam" {
-  source = "./iam"
+  source = "../../Terraform-wrappers/wrappers/iam-wrapper"
 
-  ecs_task_role_name           = "ecs-task-role-${var.aws_region}"
-  ecs_task_execution_role_name = "ecs-task-execution-role-${var.aws_region}"
+  roles              = var.iam_roles
+  policies           = var.iam_policies
+  policy_attachments = var.iam_policy_attachments
 }
 
+# ─── ECR (map-based wrapper) ──────────────────────────────────
 module "ecr" {
-  source = "./ecr"
-
-  aws_region                  = var.aws_region
-  ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
+  source       = "../../Terraform-wrappers/wrappers/ecr-wrapper"
+  repositories = var.ecr_repositories
 }
 
+# ─── ECS (map-based wrapper) ──────────────────────────────────
+module "ecs" {
+  source = "../../Terraform-wrappers/wrappers/ecs-wrapper"
+
+  clusters     = var.ecs_clusters
+  ecs_services = var.ecs_services
+}
+
+# ─── CloudFront (map-based wrapper) ───────────────────────────
+module "cloudfront" {
+  source        = "../../Terraform-wrappers/wrappers/cloudfront-wrapper"
+  distributions = var.cloudfront_distributions
+}
+
+# ─── S3 Frontend (single-instance wrapper) ────────────────────
+module "s3_frontend" {
+  source = "../../Terraform-wrappers/wrappers/s3-wrapper"
+
+  bucket              = var.s3_bucket_name
+  force_destroy       = var.s3_force_destroy
+  versioning          = var.s3_versioning
+  cors_rule           = var.s3_cors_rule
+  bucket_policy       = var.s3_bucket_policy
+  public_access_block = var.s3_public_access_block
+  ownership_controls  = var.s3_ownership_controls
+  acl                 = var.s3_acl
+  server_side_encryption = var.s3_server_side_encryption
+}
+
+# ─── RDS Global (kept as local sub-module — no wrapper) ───────
 module "rds_global" {
   source = "./rds-global"
 
@@ -175,229 +192,13 @@ module "rds_global" {
     aws.secondary = aws.secondary
   }
 
-  primary_vpc_id     = module.vpc.vpc_id
-  primary_subnets    = module.vpc.private_subnet_ids
-  primary_vpc_cidr   = var.vpc_cidr
-  secondary_vpc_id   = module.vpc_secondary.vpc_id
-  secondary_subnets  = module.vpc_secondary.private_subnet_ids
-  secondary_vpc_cidr = var.secondary_vpc_cidr
-  primary_sg_id      = module.sg.sg_id
-  secondary_sg_id    = module.sg_secondary.sg_id
-}
+  primary_vpc_id     = module.vpc.vpc_ids["primary"]
+  primary_subnets    = data.aws_subnets.primary_private.ids
+  primary_vpc_cidr   = var.vpcs["primary"].cidr_block
+  primary_sg_id      = module.sg.sg_ids["primary"]
 
-module "ecs_primary" {
-  source = "./ecs"
-
-  aws_region           = var.aws_region
-  ecr_image_url        = module.ecr.ecr_repository_url
-  alb_target_group_arn = module.alb.target_group_arns["app"]
-  pvt_subnet_ids       = module.vpc.private_subnet_ids
-  sg_id                = [module.sg.sg_id]
-  db_cluster_endpoint  = module.rds_global.primary_cluster_endpoint
-  db_secret_arn        = module.rds_global.master_user_secret_arn
-}
-
-module "ecs_secondary" {
-  source = "./ecs"
-
-  providers = {
-    aws = aws.secondary
-  }
-
-  aws_region           = var.secondary_region
-  ecr_image_url        = module.ecr.ecr_repository_url
-  alb_target_group_arn = module.alb_secondary.target_group_arns["app"]
-  pvt_subnet_ids       = module.vpc_secondary.private_subnet_ids
-  sg_id                = [module.sg_secondary.sg_id]
-  db_cluster_endpoint  = module.rds_global.reader_endpoint
-  db_secret_arn        = module.rds_global.master_user_secret_arn
-}
-
-module "cloudfront" {
-  source                      = "./cloudfront"
-  bucket_regional_domain_name = module.s3.s3_bucket_domain_name
-  primary_alb_dns_name        = module.alb.alb_dns_name
-  secondary_alb_dns_name      = module.alb_secondary.alb_dns_name
-  cf_origin_secret            = var.cf_origin_secret
-  region                      = var.aws_region
-}
-
-resource "aws_wafv2_web_acl" "alb_waf_primary" {
-  name  = "alb-protection-waf-primary"
-  scope = "REGIONAL"
-
-  default_action {
-    block {}
-  }
-
-  rule {
-    name     = "allow-cloudfront-header"
-    priority = 1
-
-    action {
-      allow {}
-    }
-
-    statement {
-      byte_match_statement {
-        field_to_match {
-          single_header {
-            name = "x-origin-secret"
-          }
-        }
-        search_string         = var.cf_origin_secret
-        positional_constraint = "EXACTLY"
-        text_transformation {
-          priority = 0
-          type     = "NONE"
-        }
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "allow-cloudfront-header-primary"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  visibility_config {
-    cloudwatch_metrics_enabled = true
-    metric_name                = "alb-waf-primary"
-    sampled_requests_enabled   = true
-  }
-}
-
-resource "aws_wafv2_web_acl_association" "alb_primary_assoc" {
-  resource_arn = module.alb.lb_arn
-  web_acl_arn  = aws_wafv2_web_acl.alb_waf_primary.arn
-  depends_on   = [module.alb]
-}
-
-resource "aws_wafv2_web_acl" "alb_waf_secondary" {
-  provider = aws.secondary
-  name     = "alb-protection-waf-secondary"
-  scope    = "REGIONAL"
-
-  default_action {
-    block {}
-  }
-
-  rule {
-    name     = "allow-cloudfront-header"
-    priority = 1
-
-    action {
-      allow {}
-    }
-
-    statement {
-      byte_match_statement {
-        field_to_match {
-          single_header {
-            name = "x-origin-secret"
-          }
-        }
-        search_string         = var.cf_origin_secret
-        positional_constraint = "EXACTLY"
-        text_transformation {
-          priority = 0
-          type     = "NONE"
-        }
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "allow-cloudfront-header-secondary"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  visibility_config {
-    cloudwatch_metrics_enabled = true
-    metric_name                = "alb-waf-secondary"
-    sampled_requests_enabled   = true
-  }
-}
-
-resource "aws_wafv2_web_acl_association" "alb_secondary_assoc" {
-  provider     = aws.secondary
-  resource_arn = module.alb_secondary.lb_arn
-  web_acl_arn  = aws_wafv2_web_acl.alb_waf_secondary.arn
-  depends_on   = [module.alb_secondary]
-}
-
-resource "aws_route53_zone" "main" {
-  name = "three-tier-app.rohanmatre.in"
-}
-
-resource "aws_route53_record" "primary" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "app.three-tier-app.rohanmatre.in"
-  type    = "A"
-
-  set_identifier = "primary"
-
-  failover_routing_policy {
-    type = "PRIMARY"
-  }
-
-  alias {
-    name                   = module.cloudfront.cloudfront_domain_name
-    zone_id                = module.cloudfront.cloudfront_hosted_zone_id
-    evaluate_target_health = true
-  }
-
-  health_check_id = aws_route53_health_check.primary.id
-}
-
-resource "aws_route53_record" "secondary" {
-  zone_id = aws_route53_zone.main.zone_id
-  name    = "app.three-tier-app.rohanmatre.in"
-  type    = "A"
-
-  set_identifier = "secondary"
-
-  failover_routing_policy {
-    type = "SECONDARY"
-  }
-
-  alias {
-    name                   = module.cloudfront.cloudfront_domain_name
-    zone_id                = module.cloudfront.cloudfront_hosted_zone_id
-    evaluate_target_health = true
-  }
-}
-
-resource "aws_route53_health_check" "primary" {
-  fqdn              = module.alb.alb_dns_name
-  port              = 80
-  type              = "HTTP"
-  resource_path     = "/health"
-  failure_threshold = 3
-  request_interval  = 30
-}
-
-data "aws_iam_policy_document" "s3_policy" {
-  statement {
-    actions   = ["s3:GetObject"]
-    resources = ["${module.s3.s3_arn}/*"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["cloudfront.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "AWS:SourceArn"
-      values   = [module.cloudfront.cloudfront_arn]
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "bucket_policy" {
-  bucket = module.s3.s3_bucket_id
-  policy = data.aws_iam_policy_document.s3_policy.json
+  secondary_vpc_id   = module.vpc.vpc_ids["secondary"]
+  secondary_subnets  = data.aws_subnets.secondary_private.ids
+  secondary_vpc_cidr = var.vpcs["secondary"].cidr_block
+  secondary_sg_id    = module.sg.sg_ids["secondary"]
 }
