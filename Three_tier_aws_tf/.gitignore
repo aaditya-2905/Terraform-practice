@@ -1,0 +1,7 @@
+.terraform
+*.tfstate
+package-lock.json
+package.json
+node_modules
+.env
+.env.example

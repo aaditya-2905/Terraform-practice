@@ -15,3 +15,8 @@ crash.log
 
 # Mac / Linux junk
 .DS_Store
+
+# Node.js
+package-lock.json
+package.json
+node_modules/
