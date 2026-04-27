@@ -250,7 +250,7 @@ variable "iam_roles" {
           ]
         }
       POLICY
-      description = "ECS task execution role"
+      description        = "ECS task execution role"
     }
     ecs_task_role = {
       assume_role_policy = <<-POLICY
@@ -265,7 +265,7 @@ variable "iam_roles" {
           ]
         }
       POLICY
-      description = "ECS task role"
+      description        = "ECS task role"
     }
   }
 }
@@ -497,3 +497,10 @@ variable "cf_origin_secret" {
   type        = string
   default     = "super-secret-value"
 }
+
+variable "backend_image_tag" {
+  description = "The tag of the backend image to deploy"
+  type        = string
+  default     = "latest"
+}
+

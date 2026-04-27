@@ -1,5 +1,7 @@
+data "aws_caller_identity" "current" {}
+
 module "vpc" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/vpc-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/vpc-wrapper?ref=main"
   vpcs   = var.vpcs
 }
 
@@ -52,7 +54,7 @@ data "aws_subnets" "secondary_private" {
 }
 
 module "sg" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/sg-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/sg-wrapper?ref=main"
 
   sgs = {
     primary = {
@@ -94,7 +96,7 @@ module "sg" {
 }
 
 module "alb_primary" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/alb-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/alb-wrapper?ref=main"
 
   name                       = var.primary_alb_name
   internal                   = var.primary_alb_internal
@@ -109,7 +111,7 @@ module "alb_primary" {
 }
 
 module "alb_secondary" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/alb-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/alb-wrapper?ref=main"
 
   aws_region                 = var.secondary_region
   name                       = var.secondary_alb_name
@@ -125,7 +127,7 @@ module "alb_secondary" {
 }
 
 module "iam" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/iam-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/iam-wrapper?ref=main"
 
   roles              = var.iam_roles
   policies           = var.iam_policies
@@ -133,24 +135,33 @@ module "iam" {
 }
 
 module "ecr" {
-  source       = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/ecr-wrapper"
+  source       = "github.com/aaditya-2905/Terraform-wrappers//wrappers/ecr-wrapper?ref=main"
   repositories = var.ecr_repositories
 }
 
+locals {
+  # Dynamically inject the CI/CD image tag for the backend service
+  processed_ecs_services = {
+    for k, v in var.ecs_services : k => merge(v, {
+      image = k == "backend" ? "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.ecr_repositories["backend"].name}:${var.backend_image_tag}" : v.image
+    })
+  }
+}
+
 module "ecs" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/ecs-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/ecs-wrapper?ref=main"
 
   clusters     = var.ecs_clusters
-  ecs_services = var.ecs_services
+  ecs_services = local.processed_ecs_services
 }
 
 module "cloudfront" {
-  source        = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/cloudfront-wrapper"
+  source        = "github.com/aaditya-2905/Terraform-wrappers//wrappers/cloudfront-wrapper?ref=main"
   distributions = var.cloudfront_distributions
 }
 
 module "s3_frontend" {
-  source = "https://github.com/aaditya-2905/Terraform-wrappers/tree/main/wrappers/s3-wrapper"
+  source = "github.com/aaditya-2905/Terraform-wrappers//wrappers/s3-wrapper?ref=main"
 
   bucket                 = var.s3_bucket_name
   force_destroy          = var.s3_force_destroy

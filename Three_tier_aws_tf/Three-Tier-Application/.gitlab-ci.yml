@@ -1,0 +1,70 @@
+stages:
+  - lint
+  - build
+  - push
+  - deploy
+
+variables:
+  AWS_REGION: "us-east-1"
+  ECR_REGISTRY: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+  IMAGE_NAME: "three-tier-backend"
+  IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
+  TF_ROOT: "Three-Tier-Application/Terraform"
+
+dockerfile_lint:
+  stage: lint
+  image: hadolint/hadolint:latest-debian
+  script:
+    - hadolint Three_tier_cloud_project/backend/Dockerfile
+  allow_failure: true
+
+build_image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} Three_tier_cloud_project/backend/
+    - docker save ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} > backend_image.tar
+  artifacts:
+    paths:
+      - backend_image.tar
+    expire_in: 1 hour
+
+vulnerability_scan:
+  stage: build
+  image: 
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  needs: ["build_image"]
+  script:
+    - trivy image --input backend_image.tar --severity HIGH,CRITICAL --exit-code 0
+
+push_to_ecr:
+  stage: push
+  image: docker:latest
+  services:
+    - docker:dind
+  needs: ["build_image"]
+  before_script:
+    - apk add --no-cache aws-cli
+    - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+  script:
+    - docker load < backend_image.tar
+    - docker push ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+    - docker tag ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${IMAGE_NAME}:latest
+    - docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest
+
+terraform_deploy:
+  stage: deploy
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
+  needs: ["push_to_ecr"]
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform init
+  script:
+    - terraform apply -auto-approve -var="backend_image_tag=${IMAGE_TAG}"
+  only:
+    - main
